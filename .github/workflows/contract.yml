@@ -1,0 +1,27 @@
+name: API contract
+
+# The portal API is undocumented and can change without notice. This runs a
+# read-only check once a day so breakage shows up here rather than in someone's
+# heating schedule.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - name: Check the API still looks like we think it does
+        env:
+          WEHEAT_USER: ${{ secrets.WEHEAT_USER }}
+          WEHEAT_PASSWORD: ${{ secrets.WEHEAT_PASSWORD }}
+        run: python examples/contract_check.py
