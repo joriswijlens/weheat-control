@@ -1,0 +1,24 @@
+[project]
+name = "weheat-control"
+version = "0.1.0"
+description = "Unofficial write access to Weheat heat pump settings (DHW scheduling, boost, heating curve)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["aiohttp>=3.9", "pydantic>=2", "typing-extensions>=4.7.1", "requests>=2.31"]
+
+[project.optional-dependencies]
+# The official read-only client, used as the reference implementation in the
+# contract check: whatever it covers, we assert against it rather than against
+# our own assumptions.
+test = ["weheat>=2026.1.25"]
+
+[project.urls]
+Homepage = "https://github.com/joriswijlens/weheat-control"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

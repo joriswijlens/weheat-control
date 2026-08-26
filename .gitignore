@@ -1,0 +1,9 @@
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+build/
+# nooit committen: credentials en tokens
+.weheat-credentials
+*.token.json
+settings*.json
