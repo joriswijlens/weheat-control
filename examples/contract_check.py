@@ -5,8 +5,10 @@ is the reference: we assert our view against theirs rather than against our own
 assumptions. What remains is exactly the delta this library adds - the settings
 endpoints their OpenAPI spec does not expose.
 
-Writes nothing. Exits non-zero on the first surprise, so it can run as a cron
-job and tell you the day Weheat changes something.
+Read-only by default, so it is safe as a cron job and safe in CI. Pass
+``--write`` to also prove the write path: it reads the hot water target and
+writes back the value it just read, which changes nothing but does exercise
+the PATCH.
 """
 
 import asyncio
@@ -94,7 +96,24 @@ async def main() -> int:
     else:
         check(False, "installer-level write was NOT refused")
 
+    if "--write" in sys.argv:
+        await check_write(pump, token, settings.dhw_target_temperature)
+
     return 1 if failures else 0
+
+
+async def check_write(pump: HeatPumpSettings, token: str, current: int) -> None:
+    """Write back the value we just read: a no-op that still exercises PATCH."""
+    try:
+        await pump.async_set_dhw_target_temperature(token, current)
+    except Exception as error:
+        check(False, f"write refused: {error}")
+        return
+    check(True, f"write accepted (hot water target rewritten as {current} C)")
+
+    after = await pump.async_get_settings(token)
+    check(after.dhw_target_temperature == current,
+          f"value unchanged after write ({after.dhw_target_temperature} C)")
 
 
 if __name__ == "__main__":
