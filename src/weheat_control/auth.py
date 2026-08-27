@@ -38,6 +38,12 @@ def read_credentials(path: str = DEFAULT_CREDENTIALS) -> tuple[str, str]:
     if env_user and env_password:
         return env_user, env_password
 
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"no credentials: set WEHEAT_USER and WEHEAT_PASSWORD, or create "
+            f"{path} with 'user=' and 'password=' lines"
+        )
+
     values: dict[str, str] = {}
     with open(path) as handle:
         for line in handle:

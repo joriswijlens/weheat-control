@@ -24,4 +24,10 @@ jobs:
         env:
           WEHEAT_USER: ${{ secrets.WEHEAT_USER }}
           WEHEAT_PASSWORD: ${{ secrets.WEHEAT_PASSWORD }}
-        run: python examples/contract_check.py
+        run: |
+          if [ -z "$WEHEAT_USER" ] || [ -z "$WEHEAT_PASSWORD" ]; then
+            echo "::notice::WEHEAT_USER and WEHEAT_PASSWORD are not set; skipping."
+            echo "A fork has no account to check against, so this is not a failure."
+            exit 0
+          fi
+          python examples/contract_check.py
