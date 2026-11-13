@@ -5,10 +5,10 @@ so that the two sit side by side, and so that adopting these endpoints upstream
 is a matter of widening the OpenAPI spec rather than reshaping an API.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .abstractions.discovery import InstallationDiscovery
-from .auth import access_token, login, read_credentials
+from .auth import PortalSession, access_token, login, read_credentials
 from .abstractions.settings import HeatPumpSettings
 from .api.control_board_api import PROTECTED_PREFIXES, ControlBoardApi
 from .api.installation_api import InstallationApi
@@ -34,6 +34,7 @@ __all__ = [
     "InstallationDiscovery",
     "InstallationSettingsDto",
     "PROTECTED_PREFIXES",
+    "PortalSession",
     "ProtectedSettingError",
     "WeheatControlException",
     "day_schedule",
