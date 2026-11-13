@@ -1,27 +1,29 @@
-"""Keycloak login for the Weheat portal API.
+"""Login for the Weheat portal API through the portal's own next-auth session.
 
-The portal uses authorization code + PKCE against a public client. Direct
-grant is disabled, so we walk the login form server-side instead of opening a
-browser. Tokens are cached and refreshed.
+Keycloak's `weheat-portal` client no longer works for direct PKCE (it wants a
+secret), so we do what the portal's browser does, without a browser: sign in
+via next-auth, walk the Keycloak login form, and keep the cookie jar. The
+portal's `/api/auth/session` then hands out access tokens; the session lasts
+about 30 days and renews tokens without the password.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import html
 import json
 import os
 import re
-import secrets
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import requests
 
-AUTH = "https://auth.weheat.nl/realms/Weheat/protocol/openid-connect"
-CLIENT_ID = "weheat-portal"
-REDIRECT = "https://portal.weheat.nl/api/auth/callback/keycloak"
+PORTAL = "https://portal.weheat.nl"
+KEYCLOAK_HOST = "auth.weheat.nl"
+TIMEOUT = 30
+#: Used when the token carries no readable expiry; Weheat access tokens live 5 min.
+TOKEN_LIFETIME = 300
 
 DEFAULT_CREDENTIALS = os.path.expanduser("~/.weheat-credentials")
 DEFAULT_CACHE = os.path.expanduser("~/.weheat-token.json")
@@ -57,98 +59,138 @@ def read_credentials(path: str = DEFAULT_CREDENTIALS) -> tuple[str, str]:
     return values["user"], values["password"]
 
 
-def _pkce() -> tuple[str, str]:
-    verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).decode().rstrip("=")
-    digest = hashlib.sha256(verifier.encode()).digest()
-    return verifier, base64.urlsafe_b64encode(digest).decode().rstrip("=")
+def _user_agent() -> str:
+    from . import __version__
+    return f"weheat-control/{__version__}"
 
 
-def login(username: str, password: str) -> dict:
-    """Full authorization code flow. Returns the raw token response."""
-    verifier, challenge = _pkce()
-    session = requests.Session()
-
-    page = session.get(
-        f"{AUTH}/auth",
-        params={
-            "client_id": CLIENT_ID,
-            "redirect_uri": REDIRECT,
-            "response_type": "code",
-            "scope": "openid email profile offline_access",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": secrets.token_urlsafe(16),
-        },
-        timeout=30,
-    )
-    page.raise_for_status()
-
-    # The login page is a JavaScript theme; the POST target lives in kcContext.
-    match = re.search(r'"loginAction"\s*:\s*"([^"]+)"', page.text)
-    if not match:
-        raise RuntimeError("loginAction not found - the login page changed")
-    action = html.unescape(match.group(1).replace("\\/", "/"))
-
-    posted = session.post(
-        action,
-        data={"username": username, "password": password, "credentialId": ""},
-        allow_redirects=False,
-        timeout=30,
-    )
-    location = posted.headers.get("location", "")
-    if "code=" not in location:
-        raise RuntimeError(f"login rejected (HTTP {posted.status_code})")
-    code = parse_qs(urlparse(location).query)["code"][0]
-
-    tokens = session.post(
-        f"{AUTH}/token",
-        data={
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": REDIRECT,
-            "client_id": CLIENT_ID,
-            "code_verifier": verifier,
-        },
-        timeout=30,
-    )
-    tokens.raise_for_status()
-    return tokens.json()
+def _token_expiry(token: str) -> float:
+    """The `exp` claim of a JWT, or a five minute guess."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return float(json.loads(base64.urlsafe_b64decode(payload))["exp"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return time.time() + TOKEN_LIFETIME
 
 
-def refresh(tokens: dict) -> dict | None:
-    response = requests.post(
-        f"{AUTH}/token",
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": tokens["refresh_token"],
-            "client_id": CLIENT_ID,
-        },
-        timeout=30,
-    )
-    return response.json() if response.status_code == 200 else None
+class PortalSession:
+    """A logged-in portal session that keeps its cookie jar.
+
+    Network problems propagate as `requests` exceptions; rejected credentials
+    raise `RuntimeError`. No Home Assistant imports, so it is usable anywhere.
+    """
+
+    def __init__(self, session: requests.Session | None = None, portal: str = PORTAL) -> None:
+        self.portal = portal.rstrip("/")
+        self.http = session or requests.Session()
+        self.http.headers["User-Agent"] = _user_agent()
+        self._token: str | None = None
+        self._token_expires_at = 0.0
+
+    def login(self, username: str, password: str) -> str:
+        """Sign in with the password. Returns a fresh access token."""
+        csrf = self.http.get(f"{self.portal}/api/auth/csrf", timeout=TIMEOUT)
+        csrf.raise_for_status()
+        signin = self.http.post(
+            f"{self.portal}/api/auth/signin/keycloak",
+            data={"csrfToken": csrf.json()["csrfToken"],
+                  "callbackUrl": self.portal, "json": "true"},
+            timeout=TIMEOUT,
+        )
+        signin.raise_for_status()
+
+        page = self.http.get(signin.json()["url"], timeout=TIMEOUT)
+        page.raise_for_status()
+        # The login page is a JavaScript theme; the POST target lives in kcContext.
+        match = re.search(r'"loginAction"\s*:\s*"([^"]+)"', page.text)
+        if not match:
+            raise RuntimeError("loginAction not found - the login page changed")
+        action = html.unescape(match.group(1).replace("\\/", "/"))
+
+        posted = self.http.post(
+            action,
+            data={"username": username, "password": password, "credentialId": ""},
+            timeout=TIMEOUT,
+        )
+        posted.raise_for_status()
+        # A wrong password re-renders the Keycloak form instead of redirecting back.
+        if urlparse(posted.url).hostname == KEYCLOAK_HOST:
+            raise RuntimeError("login rejected (wrong username or password)")
+
+        token = self._fetch_token()
+        if not token:
+            raise RuntimeError("login rejected (the portal issued no session)")
+        return token
+
+    def _fetch_token(self) -> str | None:
+        response = self.http.get(f"{self.portal}/api/auth/session", timeout=TIMEOUT)
+        response.raise_for_status()
+        token = (response.json() or {}).get("accessToken")
+        if token:
+            self._token = token
+            self._token_expires_at = _token_expiry(token)
+        return token or None
+
+    def refresh(self) -> str | None:
+        """A new access token from the existing session, or None if it has ended."""
+        return self._fetch_token()
+
+    def access_token(self, username: str | None = None, password: str | None = None) -> str:
+        """A valid access token: cached, else renewed from the session, else a login."""
+        if self._token and self._token_expires_at > time.time() + 30:
+            return self._token
+        token = self.refresh()
+        if token:
+            return token
+        if username is None or password is None:
+            raise RuntimeError("session expired and no credentials given")
+        return self.login(username, password)
+
+    def dump(self) -> dict:
+        return {"cookies": requests.utils.dict_from_cookiejar(self.http.cookies),
+                "access_token": self._token, "expires_at": self._token_expires_at}
+
+    @classmethod
+    def load(cls, state: dict, session: requests.Session | None = None) -> "PortalSession":
+        restored = cls(session)
+        restored.http.cookies = requests.utils.cookiejar_from_dict(state.get("cookies", {}))
+        restored._token = state.get("access_token")
+        restored._token_expires_at = state.get("expires_at", 0.0)
+        return restored
+
+
+def login(username: str, password: str) -> PortalSession:
+    """Log in with the password and return the session (use `.access_token()`)."""
+    session = PortalSession()
+    session.login(username, password)
+    return session
 
 
 def access_token(
     credentials_path: str = DEFAULT_CREDENTIALS,
     cache_path: str = DEFAULT_CACHE,
 ) -> str:
-    """A valid access token, refreshed or re-obtained as needed.
+    """A valid access token, for the CLI and examples.
 
-    Access tokens live five minutes, so caching the refresh token keeps the
-    password out of the hot path.
+    The session cookies are cached, so the password is only used when the
+    session has ended (about every 30 days).
     """
-    tokens = None
+    session = None
     if os.path.exists(cache_path):
-        with open(cache_path) as handle:
-            tokens = json.load(handle)
-        if tokens.get("expires_at", 0) > time.time() + 30:
-            return tokens["access_token"]
-        tokens = refresh(tokens)
-    if not tokens:
-        tokens = login(*read_credentials(credentials_path))
+        try:
+            with open(cache_path) as handle:
+                session = PortalSession.load(json.load(handle))
+        except (ValueError, OSError):
+            session = None
+    if session is None:
+        session = PortalSession()
 
-    tokens["expires_at"] = time.time() + tokens.get("expires_in", 300)
+    token = session.access_token() if session._token else session.refresh()
+    if not token:
+        token = session.login(*read_credentials(credentials_path))
+
     with open(cache_path, "w") as handle:
-        json.dump(tokens, handle)
+        json.dump(session.dump(), handle)
     os.chmod(cache_path, 0o600)
-    return tokens["access_token"]
+    return token

@@ -9,6 +9,7 @@ import aiohttp
 from ..api.installation_api import InstallationApi
 from ..api_client import ApiClient
 from ..configuration import Configuration
+from ..exceptions import ApiException
 
 
 class InstallationDiscovery:
@@ -39,16 +40,17 @@ class InstallationDiscovery:
                 client).api_v1_installations_fully_expanded_get_with_http_info(
                     page=1, page_size=1000)
 
-            if response.status_code == 200:
-                for item in (response.data or {}).get("data", []):
-                    pump = item.get("heatPump") or {}
-                    if not pump.get("controlBoardId"):
-                        continue
-                    found.append(InstallationDiscovery.InstallationInfo(
-                        installation_id=item["id"],
-                        control_board_id=pump["controlBoardId"],
-                        heat_pump_id=pump.get("id"),
-                        serial_number=pump.get("serialNumber"),
-                        has_dhw=pump.get("dhwType") == 1,
-                    ))
+            if response.status_code != 200:
+                raise ApiException(response.status_code, str(response.data or ""))
+            for item in (response.data or {}).get("data", []):
+                pump = item.get("heatPump") or {}
+                if not pump.get("controlBoardId"):
+                    continue
+                found.append(InstallationDiscovery.InstallationInfo(
+                    installation_id=item["id"],
+                    control_board_id=pump["controlBoardId"],
+                    heat_pump_id=pump.get("id"),
+                    serial_number=pump.get("serialNumber"),
+                    has_dhw=pump.get("dhwType") == 1,
+                ))
         return found

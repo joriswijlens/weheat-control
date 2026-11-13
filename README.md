@@ -66,8 +66,8 @@ password=your-portal-password
 The password is read verbatim after the first `=`, so any character is fine.
 `WEHEAT_USER` and `WEHEAT_PASSWORD` override the file, which is what CI uses.
 
-Access tokens last five minutes; the refresh token is cached in
-`~/.weheat-token.json`. If you already handle OAuth yourself — as Home
+Access tokens last five minutes; the portal session cookies (valid ~30 days) are cached in
+`~/.weheat-token.json` and renew tokens without the password. If you already handle OAuth yourself — as Home
 Assistant does — skip `weheat_control.auth` entirely and pass your own token.
 
 ## Use
@@ -108,7 +108,7 @@ See `examples/` for a settings dump, a night schedule, and the contract check.
 
 | | |
 |---|---|
-| Auth | Keycloak at `auth.weheat.nl`, realm `Weheat`, client `weheat-portal`, authorization code + PKCE. Direct grant is disabled |
+| Auth | The portal's next-auth session (`/api/auth/session`) in front of Keycloak (`auth.weheat.nl`); direct PKCE no longer works |
 | Discover | `GET /api/v1/installations/fully-expanded` — yields `id` and `heatPump.controlBoardId` |
 | Read | `GET /api/v1/installations/{installationId}/settings` — 76 fields, camelCase |
 | Write | `PATCH /api/v1/control-boards/{controlBoardId}/settings` — body `{"settings": {...}, "updateImmediately": false}`, keys **PascalCase** |
