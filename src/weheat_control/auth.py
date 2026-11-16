@@ -136,11 +136,15 @@ class PortalSession:
         """A new access token from the existing session, or None if it has ended."""
         return self._fetch_token()
 
-    def access_token(self, username: str | None = None, password: str | None = None) -> str:
-        """A valid access token: cached, else renewed from the session, else a login."""
+    def cached_token(self) -> str | None:
+        """The current token if it is still valid for at least 30 seconds."""
         if self._token and self._token_expires_at > time.time() + 30:
             return self._token
-        token = self.refresh()
+        return None
+
+    def access_token(self, username: str | None = None, password: str | None = None) -> str:
+        """A valid access token: cached, else renewed from the session, else a login."""
+        token = self.cached_token() or self.refresh()
         if token:
             return token
         if username is None or password is None:
@@ -186,7 +190,7 @@ def access_token(
     if session is None:
         session = PortalSession()
 
-    token = session.access_token() if session._token else session.refresh()
+    token = session.cached_token() or session.refresh()
     if not token:
         token = session.login(*read_credentials(credentials_path))
 

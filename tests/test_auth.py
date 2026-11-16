@@ -134,3 +134,17 @@ def test_dump_and_load_keep_the_session():
     session.login("me", "pw")
     restored = PortalSession.load(session.dump())
     assert restored.http.cookies.get("session") == "s1"
+
+
+def test_cli_access_token_logs_in_when_cached_token_is_expired_and_session_gone(tmp_path, monkeypatch):
+    from weheat_control import auth
+
+    cache = tmp_path / "token.json"
+    # Old-format / expired cache: a token that is past its expiry, no valid cookies.
+    cache.write_text(json.dumps({"access_token": "old", "expires_at": 1}))
+    creds = tmp_path / "creds"
+    creds.write_text("user=me\npassword=pw\n")
+    monkeypatch.setattr(PortalSession, "refresh", lambda self: None)
+    monkeypatch.setattr(PortalSession, "login", lambda self, u, p: "new-token")
+
+    assert auth.access_token(str(creds), str(cache)) == "new-token"
