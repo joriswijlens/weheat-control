@@ -5,7 +5,7 @@ so that the two sit side by side, and so that adopting these endpoints upstream
 is a matter of widening the OpenAPI spec rather than reshaping an API.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .abstractions.discovery import InstallationDiscovery
 from .auth import PortalSession, access_token, login, read_credentials
