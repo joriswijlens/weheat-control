@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 import aiohttp
 
 from ..api.control_board_api import ControlBoardApi
@@ -79,16 +77,6 @@ class HeatPumpSettings:
             access_token,
             schedule_settings(per_day, enabled=enabled,
                               safety_temperature=safety_temperature))
-
-    async def async_boost_dhw(self, access_token: str,
-                              until: datetime | None = None,
-                              minutes: int = 60) -> datetime:
-        """Heat the tank now, until `until` (default: `minutes` from now)."""
-        if until is None:
-            until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-        stamp = until.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        await self.async_set_settings(access_token, {"DhwBoostEndTime": stamp})
-        return until
 
     async def async_set_heating_curve(self, access_token: str,
                                       outdoor: list[float],

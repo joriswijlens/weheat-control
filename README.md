@@ -1,7 +1,7 @@
 # weheat-control
 
 Unofficial Python client for **writing** Weheat heat pump settings: hot water
-scheduling, boost, target temperature and the heating curve.
+scheduling, target temperature and the heating curve.
 
 Weheat publishes an official client,
 [`wefabricate/wh-python`](https://github.com/wefabricate/wh-python), generated
@@ -95,9 +95,6 @@ async def main():
         enabled=True, safety_temperature=40,
     )
 
-    # Or heat it right now, for the next two hours.
-    await pump.async_boost_dhw(token, minutes=120)
-
 
 asyncio.run(main())
 ```
@@ -123,7 +120,6 @@ Settings worth knowing:
 | `DhwScheduleEnabled` | Master switch for the hot water schedule |
 | `DhwSchedule{Day}Target` | 96 quarter-hour target temperatures, `0` meaning no demand |
 | `DhwScheduleSafetyTemperature` | Floor the schedule never goes below |
-| `DhwBoostEndTime` | Heat now, until this timestamp |
 | `DhwTargetTemperature` | Standing target outside the schedule |
 | `HeatingCurveX` / `HeatingCurveY` | Space heating curve, outdoor °C to flow °C |
 | `PerformanceModePreset` | Sound modes 1–5, effectively a power cap |
